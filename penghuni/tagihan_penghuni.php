@@ -1,34 +1,42 @@
 <?php
 session_start();
+require '../koneksi.php';
 
-// Proteksi Halaman
 if (!isset($_SESSION['id_user']) || $_SESSION['role'] !== 'penghuni') {
     header("Location: ../login.php");
     exit;
 }
 
-// --- SIMULASI QUERY DATABASE ---
-// Di aplikasi aslinya, kamu akan melakukan query JOIN antara tabel 'tagihan' dan 'detail_tagihan'
-// berdasarkan id_penghuni yang sedang login.
+$id_user = $_SESSION['id_user'];
 
-// Data simulasi tagihan utama
-$data_tagihan = [
-    'bulan' => 'April 2026',
-    'total_tagihan' => 850000,
-    'status' => 'Belum Lunas', // 'Belum Lunas', 'Menunggu Konfirmasi', 'Lunas'
-    'jatuh_tempo' => '2026-04-10'
-];
+$query_penghuni = $conn->query("SELECT id_penghuni FROM penghuni WHERE id_user = '$id_user'");
+$id_penghuni = ($query_penghuni && $query_penghuni->num_rows > 0) ? $query_penghuni->fetch_assoc()['id_penghuni'] : 0;
 
-// Data simulasi rincian/detail tagihan
-$detail_tagihan = [
-    ['nama_item' => 'Sewa Kamar Standar', 'nominal' => 800000],
-    ['nama_item' => 'Tagihan Laundry (Maret)', 'nominal' => 50000]
-];
+$query_tagihan = $conn->query("SELECT id_tagihan, bulan, total_tagihan, status, jatuh_tempo FROM tagihan WHERE id_penghuni = '$id_penghuni' ORDER BY id_tagihan DESC LIMIT 1");
 
-// Data simulasi pengingat dari pemilik (jika ada)
+$data_tagihan = [];
+$detail_tagihan = [];
 $pesan_pengingat = "Mohon segera melunasi tagihan bulan ini sebelum tanggal jatuh tempo ya. Terima kasih!";
 
-// Fungsi format rupiah
+if ($query_tagihan && $query_tagihan->num_rows > 0) {
+    $data_tagihan = $query_tagihan->fetch_assoc();
+    $id_tagihan = $data_tagihan['id_tagihan'];
+
+    $query_detail = $conn->query("SELECT nama_item, nominal FROM detail_tagihan WHERE id_tagihan = '$id_tagihan'");
+    if ($query_detail) {
+        while ($row = $query_detail->fetch_assoc()) {
+            $detail_tagihan[] = $row;
+        }
+    }
+} else {
+    $data_tagihan = [
+        'bulan' => date('F Y'),
+        'total_tagihan' => 0,
+        'status' => 'Belum Ada Tagihan',
+        'jatuh_tempo' => '-'
+    ];
+}
+
 function formatRupiah($angka){
     return "Rp " . number_format($angka, 0, ',', '.');
 }
@@ -46,7 +54,7 @@ function formatRupiah($angka){
 
     <nav class="bg-blue-600 text-white shadow-md sticky top-0 z-50">
         <div class="max-w-4xl mx-auto px-4 py-3 flex items-center">
-            <a href="dashboard.php" class="mr-4 hover:bg-blue-700 p-2 rounded-full transition">
+            <a href="dashboard_penghuni.php" class="mr-4 hover:bg-blue-700 p-2 rounded-full transition">
                 <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
             </a>
             <div class="font-bold text-lg">Rincian Tagihan</div>
@@ -67,7 +75,7 @@ function formatRupiah($angka){
 
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
             <div class="bg-blue-50 p-6 text-center border-b border-gray-100 relative">
-                <p class="text-sm text-gray-500 font-medium mb-1">Total Tagihan <?php echo $data_tagihan['bulan']; ?></p>
+                <p class="text-sm text-gray-500 font-medium mb-1">Total Tagihan <?php echo htmlspecialchars($data_tagihan['bulan']); ?></p>
                 <h1 class="text-4xl font-extrabold text-blue-600 tracking-tight"><?php echo formatRupiah($data_tagihan['total_tagihan']); ?></h1>
                 
                 <div class="mt-4">
@@ -75,6 +83,8 @@ function formatRupiah($angka){
                         <span class="bg-green-100 text-green-800 px-4 py-1.5 rounded-full text-sm font-bold border border-green-200">LUNAS</span>
                     <?php elseif($data_tagihan['status'] == 'Menunggu Konfirmasi'): ?>
                         <span class="bg-orange-100 text-orange-800 px-4 py-1.5 rounded-full text-sm font-bold border border-orange-200">MENUNGGU KONFIRMASI</span>
+                    <?php elseif($data_tagihan['status'] == 'Belum Ada Tagihan'): ?>
+                        <span class="bg-gray-100 text-gray-600 px-4 py-1.5 rounded-full text-sm font-bold border border-gray-200">BELUM DIBUAT</span>
                     <?php else: ?>
                         <span class="bg-red-100 text-red-800 px-4 py-1.5 rounded-full text-sm font-bold border border-red-200">BELUM LUNAS</span>
                     <?php endif; ?>
@@ -83,19 +93,25 @@ function formatRupiah($angka){
             
             <div class="p-4 flex justify-between items-center text-sm">
                 <span class="text-gray-500">Jatuh Tempo</span>
-                <span class="font-bold text-gray-800"><?php echo date('d M Y', strtotime($data_tagihan['jatuh_tempo'])); ?></span>
+                <span class="font-bold text-gray-800">
+                    <?php echo ($data_tagihan['jatuh_tempo'] !== '-') ? date('d M Y', strtotime($data_tagihan['jatuh_tempo'])) : '-'; ?>
+                </span>
             </div>
         </div>
 
         <h3 class="text-lg font-bold text-gray-700 mb-3 px-1">Rincian Biaya</h3>
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-8">
             <ul class="divide-y divide-gray-50">
-                <?php foreach($detail_tagihan as $item): ?>
-                <li class="p-4 flex justify-between items-center hover:bg-gray-50 transition">
-                    <span class="text-gray-700 text-sm"><?php echo $item['nama_item']; ?></span>
-                    <span class="font-semibold text-gray-800 text-sm"><?php echo formatRupiah($item['nominal']); ?></span>
-                </li>
-                <?php endforeach; ?>
+                <?php if (empty($detail_tagihan)): ?>
+                    <li class="p-5 text-center text-gray-500 text-sm">Tidak ada rincian tagihan.</li>
+                <?php else: ?>
+                    <?php foreach($detail_tagihan as $item): ?>
+                    <li class="p-4 flex justify-between items-center hover:bg-gray-50 transition">
+                        <span class="text-gray-700 text-sm"><?php echo htmlspecialchars($item['nama_item']); ?></span>
+                        <span class="font-semibold text-gray-800 text-sm"><?php echo formatRupiah($item['nominal']); ?></span>
+                    </li>
+                    <?php endforeach; ?>
+                <?php endif; ?>
             </ul>
             <div class="bg-gray-50 p-4 border-t border-gray-100 flex justify-between items-center">
                 <span class="font-bold text-gray-700">Total Keseluruhan</span>
@@ -111,7 +127,7 @@ function formatRupiah($angka){
             <a href="riwayat_pembayaran.php" class="w-1/3 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 px-4 rounded-xl transition text-sm">
                 Riwayat
             </a>
-            <a href="bayar_tagihan.php" class="w-2/3 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition text-sm">
+            <a href="bayar_tagihan.php?id=<?php echo isset($id_tagihan) ? $id_tagihan : ''; ?>" class="w-2/3 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition text-sm">
                 Bayar Sekarang
             </a>
         </div>
